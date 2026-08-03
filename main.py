@@ -1,52 +1,77 @@
 import cv2
 import sys
 import os
+import glob
 
-try:
-    get_image = sys.argv[1] # try to get the image file from cli argument
-except:
-    # show usage when using pyinstaller bundle
+# 1. Properly check for CLI arguments
+if len(sys.argv) < 2:
     if getattr(sys, 'frozen', False):
-        print("usage: graphia <path/of/image>")
-        sys.exit(1)
+        print("usage: graphia <path/of/image_or_folder>")
+    elif os.name == 'nt':
+        print("usage: python main.py <path/of/image_or_folder>")
     else:
-        if os.name == 'nt':
-            # show usage when running as python script in windows
-            print("usage: python main.py <path/of/image>")
-            sys.exit(1)
-        else:
-            # show usage when running as python script in linux, macOS
-            print("usage: python3 main.py <path/of/image>")
-            sys.exit(1)
+        print("usage: python3 main.py <path/of/image_or_folder>")
+    sys.exit(1)
 
-# output dir
-output = os.path.join(os.path.dirname(get_image), "graphia")
+# Get argument as a string
+input_path = sys.argv[1]
 
-# create the output dir if not already exists
+# 2. Determine base directory for the output folder
+if os.path.isdir(input_path):
+    base_dir = input_path
+elif os.path.isfile(input_path):
+    base_dir = os.path.dirname(input_path)
+else:
+    # Handles wildcard paths like "folder/*" or non-existent paths
+    base_dir = os.path.dirname(input_path) or "."
+
+output = os.path.join(base_dir, "graphia")
+
+# Create output directory if it doesn't exist
 if not os.path.exists(output):
     try:
-        os.mkdir(os.path.join(output))
+        os.makedirs(output, exist_ok=True)
     except Exception as e:
-        print(e)
+        print(f"Failed to create directory: {e}")
         sys.exit(1)
 
-try:
-    # read the image
-    img = cv2.imread(get_image, cv2.IMREAD_UNCHANGED)
+def gray(source, output_dir=output):
+    try:
+        if os.path.isfile(source):
+            img = cv2.imread(source, cv2.IMREAD_UNCHANGED)
 
-    # convert to gray
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            if img is None:
+                print(f"Skipping (not a valid image or unsupported format): {source}")
+                return None
 
-    # get file name and ext and output
-    get_name = os.path.basename(get_image)
-    file_name, file_ext = os.path.splitext(get_name)
-    output_file = os.path.join(output, f"{file_name}-gray{file_ext}")
+            # Handle PNGs with alpha channels (4 channels) or single channel images
+            if len(img.shape) == 3 and img.shape[2] == 4:
+                gray_img = cv2.cvtColor(img, cv2.COLOR_BGRA2GRAY)
+            elif len(img.shape) == 3 and img.shape[2] == 3:
+                gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            else:
+                gray_img = img  # Already single-channel
 
-    # write the image
-    cv2.imwrite(output_file, gray)
+            get_name = os.path.basename(source)
+            file_name, file_ext = os.path.splitext(get_name)
+            output_file = os.path.join(output_dir, f"{file_name}-gray{file_ext}")
 
-    print(f"Output: {output_file}")
-    sys.exit(0)
-except Exception as e:
-    print(e)
-    sys.exit(1)
+            cv2.imwrite(output_file, gray_img)
+            print(f"Output: {output_file}")
+            return output_file
+    except Exception as e:
+        print(f"Error processing {source}: {e}")
+
+# 3. Handle processing for both single files and directory searches
+if os.path.isfile(input_path):
+    gray(input_path)
+else:
+    # Expand path if user passes "folder/*" or just "folder"
+    search_path = input_path if "*" in input_path else os.path.join(input_path, "*")
+    
+    files = [f for f in glob.glob(search_path) if os.path.isfile(f)]
+    if not files:
+        print(f"No files found for path: {input_path}")
+    else:
+        for item in files:
+            gray(item)
